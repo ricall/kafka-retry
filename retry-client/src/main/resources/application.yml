@@ -1,0 +1,51 @@
+server:
+  port: 8201
+
+spring:
+  cloud:
+    stream:
+      function:
+        definition: deliveryTopic1;deliveryTopic2
+
+      # Kafka binder configuration
+      default-binder: kafka
+      kafka:
+        binder:
+          required-acks: all
+          auto-alter-topics: true
+          auto-add-partitions: true
+          min-partition-count: 4
+          transaction:
+            transaction-id-prefix: client-${INSTANCE_ID:1}
+            producer:
+              error-channel-enabled: true
+              partition-count: 4
+
+      # Default binding configuration
+      default:
+        producer:
+          headerMode: headers
+          useNativeEncoding: true
+        consumer:
+          useNativeEncoding: true
+          concurrency: 4
+          partitioned: true
+
+      bindings:
+        # Delivery Topic 1
+        deliveryTopic1-in-0:
+          group: retry-group
+          destination: delivery.topic0
+          consumer.concurrency: 1
+
+        # Delivery Topic 2
+        deliveryTopic2-in-0:
+          group: retry-group
+          destination: delivery.topic1
+          consumer.concurrency: 1
+
+logging:
+  level:
+    org.springframework: WARN
+    org.springframework.cloud.stream: WARN
+    org.apache.kafka: WARN

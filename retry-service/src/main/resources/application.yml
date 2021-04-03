@@ -1,0 +1,101 @@
+server:
+  port: 8200
+
+spring:
+  cloud:
+    stream:
+      function:
+        definition: retryService;retryTopic1;retryTopic2;retryTopic3;retryTopic4;dlqListener
+
+      # Default binding configuration
+      default:
+        producer:
+          headerMode: headers
+          useNativeEncoding: true
+        consumer:
+          useNativeEncoding: true
+          concurrency: 4
+          partitioned: true
+
+      # Kafka binder configuration
+      default-binder: kafka
+      kafka:
+        binder:
+          required-acks: all
+          auto-alter-topics: true
+          auto-add-partitions: true
+          min-partition-count: 4
+          transaction:
+            transaction-id-prefix: retry-${INSTANCE_ID:1}
+            producer:
+              error-channel-enabled: true
+              partition-count: 4
+
+      bindings:
+        # Retry Service Topic - We could listen to multilple topics and verify
+        # that the reply-topic is allowed to send back to the same topic
+        retryService-in-0:
+          group: retry-group
+          destination: retry.topic
+        retryService-out-0.destination: ${retry.dead-letter-topic}
+
+        # Retry Topic 1
+        retryTopic1-in-0:
+          group: retry-group
+          destination: ${retry.delay-topics[0].topic}
+        retryTopic1-out-0.destination: ${retry.dead-letter-topic}
+
+        # Retry Topic 2
+        retryTopic2-in-0:
+          group: retry-group
+          destination: ${retry.delay-topics[1].topic}
+        retryTopic2-out-0.destination: ${retry.dead-letter-topic}
+
+        # Retry Topic 3
+        retryTopic3-in-0:
+          group: retry-group
+          destination: ${retry.delay-topics[2].topic}
+        retryTopic3-out-0.destination: ${retry.dead-letter-topic}
+
+        # Retry Topic 4
+        retryTopic4-in-0:
+          group: retry-group
+          destination: ${retry.delay-topics[3].topic}
+        retryTopic4-out-0.destination: ${retry.dead-letter-topic}
+
+        # Delivery Topic 1
+        deliveryTopic1-in-0:
+          group: retry-group
+          destination: delivery.topic0
+          consumer.concurrency: 1
+
+        # Delivery Topic 2
+        deliveryTopic2-in-0:
+          group: retry-group
+          destination: delivery.topic1
+          consumer.concurrency: 1
+
+        # Dead Letter Queue
+        dlqListener-in-0:
+          group: retry-group
+          destination: ${retry.dead-letter-topic}
+          consumer.concurrency: 1
+
+retry:
+  jitter: 50ms
+  dead-letter-topic: retry.dlq
+  delay-topics:
+    - delay: 1s
+      topic: retry.internal.delay1
+    - delay: 5s
+      topic: retry.internal.delay2
+    - delay: 17s
+      topic: retry.internal.delay3
+    - delay: 59s
+      topic: retry.internal.delay4
+
+logging:
+  level:
+    org.springframework: WARN
+    org.springframework.cloud.stream: WARN
+    org.apache.kafka: WARN
