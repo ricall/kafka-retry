@@ -21,21 +21,10 @@
  * WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
-package io.ricall.kafka.retry.consumers;
+package io.ricall.kafka.retry.service;
 
-import io.ricall.kafka.retry.configuration.KafkaProperties;
-import io.ricall.kafka.retry.router.MessageRouter;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.stereotype.Component;
+public interface DelayService {
 
-@Slf4j
-@Component
-public class RetryTopic1 extends AbstractRetryTopicListener {
-
-    @Override
-    public KafkaProperties.DelayTopic getTopicConfiguration() {
-        return getProperties().getDelayTopics().get(0);
-    }
+    void delayMillis(long millis);
 
 }

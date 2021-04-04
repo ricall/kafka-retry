@@ -25,13 +25,16 @@ package io.ricall.kafka.retry.consumers;
 
 import io.ricall.kafka.retry.configuration.KafkaProperties;
 import io.ricall.kafka.retry.router.MessageRouter;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
+@Slf4j
 @Component
 public class RetryTopic3 extends AbstractRetryTopicListener {
 
-    public RetryTopic3(KafkaProperties properties, MessageRouter router) {
-        super(properties.getDelayTopics().get(2), router);
+    @Override
+    public KafkaProperties.DelayTopic getTopicConfiguration() {
+        return getProperties().getDelayTopics().get(2);
     }
     
 }

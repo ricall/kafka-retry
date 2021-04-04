@@ -7,16 +7,6 @@ spring:
       function:
         definition: retryService;retryTopic1;retryTopic2;retryTopic3;retryTopic4;dlqListener
 
-      # Default binding configuration
-      default:
-        producer:
-          headerMode: headers
-          useNativeEncoding: true
-        consumer:
-          useNativeEncoding: true
-          concurrency: 4
-          partitioned: true
-
       # Kafka binder configuration
       default-binder: kafka
       kafka:
@@ -25,55 +15,85 @@ spring:
           auto-alter-topics: true
           auto-add-partitions: true
           min-partition-count: 4
+          producer-properties:
+            batch.size: 1000
+            linger.ms: 5
+            enable.idempotence: true
           transaction:
             transaction-id-prefix: retry-${INSTANCE_ID:1}
             producer:
-              error-channel-enabled: true
               partition-count: 4
 
+      # Default binding configuration
+      default:
+        producer:
+          header-mode: headers
+          use-native-encoding: true
+        consumer:
+          use-native-decoding: true
+          concurrency: 4
+          partitioned: true
+
+      kafka.bindings:
+        retryTopic1-in-0:
+          consumer:
+            configuration:
+              isolation.level: read_committed
+
+        retryTopic2-in-0:
+          consumer:
+            configuration:
+              isolation.level: read_committed
+
+        retryTopic3-in-0:
+          consumer:
+            configuration:
+              isolation.level: read_committed
+
+        retryTopic4-in-0:
+          consumer:
+            configuration:
+              isolation.level: read_committed
+
       bindings:
-        # Retry Service Topic - We could listen to multilple topics and verify
+        # Retry Service Topic - We could listen to multiple topics and verify
         # that the reply-topic is allowed to send back to the same topic
         retryService-in-0:
-          group: retry-group
+          group: retry-internal
           destination: retry.topic
         retryService-out-0.destination: ${retry.dead-letter-topic}
 
         # Retry Topic 1
         retryTopic1-in-0:
-          group: retry-group
+          group: retry-internal
           destination: ${retry.delay-topics[0].topic}
+          consumer:
+            batch-mode: false
         retryTopic1-out-0.destination: ${retry.dead-letter-topic}
 
         # Retry Topic 2
         retryTopic2-in-0:
-          group: retry-group
+          group: retry-internal
           destination: ${retry.delay-topics[1].topic}
+          consumer:
+            batch-mode: false
         retryTopic2-out-0.destination: ${retry.dead-letter-topic}
 
         # Retry Topic 3
         retryTopic3-in-0:
-          group: retry-group
+          group: retry-internal
           destination: ${retry.delay-topics[2].topic}
+          consumer:
+            batch-mode: false
         retryTopic3-out-0.destination: ${retry.dead-letter-topic}
 
         # Retry Topic 4
         retryTopic4-in-0:
           group: retry-group
           destination: ${retry.delay-topics[3].topic}
+          consumer:
+            batch-mode: false
         retryTopic4-out-0.destination: ${retry.dead-letter-topic}
-
-        # Delivery Topic 1
-        deliveryTopic1-in-0:
-          group: retry-group
-          destination: delivery.topic0
-          consumer.concurrency: 1
-
-        # Delivery Topic 2
-        deliveryTopic2-in-0:
-          group: retry-group
-          destination: delivery.topic1
-          consumer.concurrency: 1
 
         # Dead Letter Queue
         dlqListener-in-0:
@@ -85,13 +105,13 @@ retry:
   jitter: 50ms
   dead-letter-topic: retry.dlq
   delay-topics:
-    - delay: 1s
+    - delay: 500ms
       topic: retry.internal.delay1
-    - delay: 5s
+    - delay: 1s
       topic: retry.internal.delay2
-    - delay: 17s
+    - delay: 3s
       topic: retry.internal.delay3
-    - delay: 59s
+    - delay: 9s
       topic: retry.internal.delay4
 
 logging:

@@ -21,21 +21,23 @@
  * WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
-package io.ricall.kafka.retry.consumers;
+package io.ricall.kafka.retry.service.impl;
 
-import io.ricall.kafka.retry.configuration.KafkaProperties;
-import io.ricall.kafka.retry.router.MessageRouter;
-import lombok.RequiredArgsConstructor;
+import io.ricall.kafka.retry.service.DelayService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 @Slf4j
 @Component
-public class RetryTopic1 extends AbstractRetryTopicListener {
+public class DelayServiceImpl implements DelayService {
 
-    @Override
-    public KafkaProperties.DelayTopic getTopicConfiguration() {
-        return getProperties().getDelayTopics().get(0);
+    public void delayMillis(long millis) {
+        try {
+            Thread.sleep(millis);
+        } catch (InterruptedException e) {
+            log.warn("Retry thread interrupted", e);
+            Thread.currentThread().interrupt();
+        }
     }
 
 }

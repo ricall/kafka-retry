@@ -23,6 +23,7 @@
 
 package io.ricall.kafka.retry.service;
 
+import io.ricall.kafka.retry.configuration.KafkaProperties;
 import io.ricall.kafka.retry.router.MessageRouter;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -31,6 +32,7 @@ import org.springframework.messaging.MessageHeaders;
 import org.springframework.messaging.support.MessageBuilder;
 import org.springframework.stereotype.Component;
 
+import java.util.Optional;
 import java.util.function.Function;
 
 @Slf4j
@@ -39,7 +41,6 @@ import java.util.function.Function;
 public class RetryService implements Function<Message<byte[]>, Message<byte[]>> {
 
     public static final String PREFIX = "retry_";
-    public static final String ORIGINAL_MESSAGE_KEY = PREFIX + "MessageKey";
     public static final String RETRY_DELAY = PREFIX + "Delay";
     public static final String RETRY_TYPE = PREFIX + "Type";
     public static final String RETRY_MAX = PREFIX + "Max";
@@ -47,19 +48,28 @@ public class RetryService implements Function<Message<byte[]>, Message<byte[]>> 
     public static final String RETRY_DLQ = PREFIX + "DLQ";
     public static final String RETRY_COUNT = PREFIX + "Count";
     public static final String RETRY_TIME = PREFIX + "Time";
+    public static final int DEFAULT_MAXIMUM_RETRIES = 5;
 
+    private final KafkaProperties properties;
     private final MessageRouter topicResolver;
 
     @Override
     public Message<byte[]> apply(Message<byte[]> message) {
-//        log.info(" **** Received message: {}", message);
-
         final MessageHeaders headers = message.getHeaders();
+
         long retryTime = topicResolver.getDeliveryTimeForMessage(headers);
+        String topic = topicResolver.getTopicToRouteMessageTo(headers, retryTime);
+        int retryCount = Optional.ofNullable(headers.get(RETRY_COUNT, Integer.class)).orElse(0) + 1;
+        if (retryCount > Optional.ofNullable(headers.get(RETRY_MAX, Integer.class)).orElse(DEFAULT_MAXIMUM_RETRIES)) {
+            topic = Optional.ofNullable(headers.get(RetryService.RETRY_DLQ, String.class))
+                    .orElse(properties.getDeadLetterTopic());
+        }
 
         return MessageBuilder.fromMessage(message)
                 .setHeader(RETRY_TIME, retryTime)
-                .setHeader("spring.cloud.stream.sendto.destination", topicResolver.getTopicToRouteMessageTo(headers, retryTime))
+                .setHeader(RETRY_COUNT, retryCount)
+                .setHeader("_trace", topic)
+                .setHeader("spring.cloud.stream.sendto.destination", topic)
                 .build();
     }
 

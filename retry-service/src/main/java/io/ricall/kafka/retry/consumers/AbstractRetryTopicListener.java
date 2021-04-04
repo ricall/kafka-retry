@@ -23,52 +23,87 @@
 
 package io.ricall.kafka.retry.consumers;
 
+import io.ricall.kafka.retry.configuration.KafkaProperties;
 import io.ricall.kafka.retry.configuration.KafkaProperties.DelayTopic;
 import io.ricall.kafka.retry.router.MessageRouter;
+import io.ricall.kafka.retry.service.DelayService;
 import io.ricall.kafka.retry.service.RetryService;
-import lombok.RequiredArgsConstructor;
+import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.messaging.Message;
 import org.springframework.messaging.MessageHeaders;
 import org.springframework.messaging.support.MessageBuilder;
 
+import javax.annotation.PostConstruct;
 import java.util.Optional;
 import java.util.function.Function;
 
+import static org.springframework.kafka.support.KafkaHeaders.RECEIVED_TIMESTAMP;
+
+@Data
 @Slf4j
-@RequiredArgsConstructor
 public abstract class AbstractRetryTopicListener implements Function<Message<byte[]>, Message<byte[]>> {
 
-    private final DelayTopic configuration;
-    private final MessageRouter topicResolver;
+    @Autowired private KafkaProperties properties;
+    @Autowired private MessageRouter topicResolver;
+    @Autowired private DelayService delayService;
 
-    private void delayMillis(long millis) {
-//        log.info("Waiting {}ms", millis);
-        try {
-            Thread.sleep(millis);
-        } catch (InterruptedException e) {
-            log.warn("Retry thread interrupted", e);
-            Thread.currentThread().interrupt();
-        }
+    private volatile long windowEnd;
+
+    @PostConstruct
+    public void init() {
+        windowEnd = System.currentTimeMillis() + getTopicConfiguration().getDelay().toMillis();
     }
+
+    public abstract DelayTopic getTopicConfiguration();
 
     @Override
     public Message<byte[]> apply(Message<byte[]> message) {
-//        log.info(" +++++ ({}) Received message: {}", configuration, message);
+        return handleMessage(message);
+    }
 
-        final MessageHeaders headers = message.getHeaders();
-        String newTopic = topicResolver.getTopicToRouteMessageTo(headers);
-        if (configuration.getTopic().equals(newTopic)) {
-            long delay = Optional.ofNullable(headers.get(RetryService.RETRY_TIME, Long.class))
-                    .orElseGet(System::currentTimeMillis) - System.currentTimeMillis() - 50;
+    private synchronized long advanceWindowEndIfNecessary(long now, long messageTime) {
+        long topicDelay = getTopicConfiguration().getDelay().toMillis();
 
-            if (delay > 0) {
-                delayMillis(Math.min(delay, configuration.getDelay().toMillis()));
-            }
-            newTopic = topicResolver.getTopicToRouteMessageTo(headers);
+        while (messageTime > windowEnd && windowEnd < (now + topicDelay)) {
+            windowEnd += topicDelay;
         }
+        return windowEnd;
+    }
+
+    private Message<byte[]> handleMessage(Message<byte[]> message) {
+        final MessageHeaders headers = message.getHeaders();
+        final long time = Optional.ofNullable(headers.get(RetryService.RETRY_TIME, Long.class))
+                .orElseThrow(IllegalStateException::new);
+        final long now = System.currentTimeMillis();
+        final DelayTopic configuration = getTopicConfiguration();
+
+        String trace = Optional.ofNullable(headers.get("_trace", String.class))
+                .orElseThrow(IllegalStateException::new)
+                + " > " + getTopicConfiguration().getDelay() + "|" + (time - System.currentTimeMillis()) + "|";
+        String topic = topicResolver.getTopicToRouteMessageTo(headers);
+        if (configuration.getTopic().equals(topic)) {
+            long messageTime = Optional.ofNullable(headers.get(RECEIVED_TIMESTAMP, Long.class))
+                    .orElseThrow(IllegalStateException::new);
+
+            long currentWindowEnd = advanceWindowEndIfNecessary(now, messageTime);
+            if (messageTime < currentWindowEnd) {
+                long delay = time - now - properties.getJitter().toMillis();
+
+                delay = Math.min(delay, currentWindowEnd - now);
+                if (delay > 0) {
+                    delayService.delayMillis(delay);
+                    topic = topicResolver.getTopicToRouteMessageTo(headers);
+                }
+            }
+        }
+        trace += topic + "|" + (time - System.currentTimeMillis());
+        log.info("OUT [{}] {} (delay {}ms)", trace, new String(message.getPayload()), System.currentTimeMillis() - now);
         return MessageBuilder.fromMessage(message)
-                .setHeader("spring.cloud.stream.sendto.destination", newTopic)
+                .setHeader("spring.cloud.stream.sendto.destination", topic)
+                .setHeader("_trace", trace)
                 .build();
     }
+
 }

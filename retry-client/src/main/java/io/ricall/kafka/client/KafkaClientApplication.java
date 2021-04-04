@@ -18,7 +18,6 @@ import reactor.core.publisher.Flux;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Optional;
-import java.util.Random;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
@@ -50,13 +49,16 @@ public class KafkaClientApplication {
     private Consumer<Message<byte[]>> displayMessageInfo(int index) {
         return message -> {
             final MessageHeaders headers = message.getHeaders();
+            String trace = Optional.ofNullable(headers.get("_trace", String.class)).orElse("");
             long offset = System.currentTimeMillis() - Optional.ofNullable(headers.get(RetryHeaders.RETRY_TIME, Long.class)).orElse(0L);
-            log.info("deliveryTopic{}({}): {} Delivered after delay {} -> {}",
+
+            log.info("{}({}): {} Delivered after delay {} -> {} [{}]",
                     index,
                     count.incrementAndGet(),
                     new String(message.getPayload()),
                     Optional.ofNullable(headers.get(RetryHeaders.RETRY_DELAY, String.class)).orElse(""),
-                    offset);
+                    offset,
+                    trace);
 //            log.info("         {}", message);
         };
     }
@@ -66,20 +68,27 @@ public class KafkaClientApplication {
         int items = 1_000;
 
         return args -> {
-            log.info("Started Application - Sending {} records", items);
+            log.info("Started Application: {}", items);
+
+//            sendMessage(0, 20);
+//            sendMessage(1, 12);
+//            sendMessage(2, 12);
+//            sendMessage(3, 11);
+//            sendMessage(4, 10);
+
             Flux.range(1, items)
-                    .delayElements(Duration.ofMillis(40))
+                    .delayElements(Duration.ofMillis(20))
                     .doOnTerminate(() -> log.info("Finished - All records sent"))
-                    .subscribe(this::sendMessage);
+                    .subscribe( i -> sendMessage(i, i % 25));
         };
     }
 
-    private void sendMessage(int index) {
+    private void sendMessage(int index, int delay) {
         String payload = "Test Message " + index;
         String header = "" + index;
         final Message<byte[]> message = MessageBuilder.withPayload(payload.getBytes(StandardCharsets.UTF_8))
                 .setHeader(KafkaHeaders.MESSAGE_KEY, header.getBytes(StandardCharsets.UTF_8))
-                .setHeader(RetryHeaders.RETRY_DELAY, "PT" + new Random().nextInt(60) + "S")
+                .setHeader(RetryHeaders.RETRY_DELAY, "PT" + delay + "S")
                 .setHeader(RetryHeaders.RETRY_TOPIC, "delivery.topic" + (index % 2))
                 .build();
 

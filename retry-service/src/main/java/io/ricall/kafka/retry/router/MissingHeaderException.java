@@ -23,7 +23,13 @@
 
 package io.ricall.kafka.retry.router;
 
+import io.ricall.kafka.retry.service.RetryService;
+
 public class MissingHeaderException extends RuntimeException {
+
+    public MissingHeaderException() {
+        this(RetryService.RETRY_TIME);
+    }
 
     public MissingHeaderException(String header) {
         super("Required header is missing: " + header);

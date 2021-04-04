@@ -46,13 +46,16 @@ public class MessageRouter {
 
     private final KafkaProperties properties;
 
-    public long getDeliveryTimeForMessage(MessageHeaders headers) {
-        long timestamp = Optional.ofNullable(headers.get(RECEIVED_TIMESTAMP, Long.class))
+    public long getMessageReceivedTimestamp(MessageHeaders headers) {
+        return Optional.ofNullable(headers.get(RECEIVED_TIMESTAMP, Long.class))
                 .orElseThrow(() -> new MissingHeaderException(RECEIVED_TIMESTAMP));
+    }
+
+    public long getDeliveryTimeForMessage(MessageHeaders headers) {
         final String duration = Optional.ofNullable(headers.get(RETRY_DELAY, String.class))
                 .orElse(DEFAULT_DELIVERY_DELAY);
 
-        return timestamp + Duration.parse(duration).toMillis();
+        return getMessageReceivedTimestamp(headers) + Duration.parse(duration).toMillis();
     }
 
     public String getTopicToRouteMessageTo(MessageHeaders headers) {
@@ -66,10 +69,8 @@ public class MessageRouter {
         String dlq = Optional.ofNullable(headers.get(RetryService.RETRY_DLQ, String.class))
                 .orElse(properties.getDeadLetterTopic());
 
-        deliveryTime -= properties.getJitter().toMillis();
-
         long now = System.currentTimeMillis();
-        if (deliveryTime <= now) {
+        if (deliveryTime <= (now + properties.getJitter().toMillis())) {
             return Optional.ofNullable(headers.get(RetryService.RETRY_TOPIC, String.class)).orElse(dlq);
         }
 
