@@ -21,20 +21,21 @@
  * WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
-package io.ricall.kafka.retry.consumers;
+package io.ricall.kafka.retry.consumers.reactive;
 
 import io.ricall.kafka.retry.configuration.KafkaProperties;
-import io.ricall.kafka.retry.router.MessageRouter;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 @Slf4j
 @Component
-public class RetryTopic3 extends AbstractRetryTopicListener {
+@ConditionalOnProperty(name = "consumer.reactive", havingValue = "true")
+public class RetryTopic2 extends AbstractReactiveRetryTopicListener {
 
     @Override
     public KafkaProperties.DelayTopic getTopicConfiguration() {
-        return getProperties().getDelayTopics().get(2);
+        return getProperties().getDelayTopics().get(1);
     }
     
 }

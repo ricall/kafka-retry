@@ -38,12 +38,12 @@ public class KafkaClientApplication {
 
     @Bean
     public Consumer<Message<byte[]>> deliveryTopic1() {
-        return displayMessageInfo(1);
+        return displayMessageInfo(0);
     }
 
     @Bean
     public Consumer<Message<byte[]>> deliveryTopic2() {
-        return displayMessageInfo(2);
+        return displayMessageInfo(1);
     }
 
     private Consumer<Message<byte[]>> displayMessageInfo(int index) {

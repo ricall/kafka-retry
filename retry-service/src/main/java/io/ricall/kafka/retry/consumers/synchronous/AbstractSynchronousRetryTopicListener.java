@@ -21,7 +21,7 @@
  * WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
-package io.ricall.kafka.retry.consumers;
+package io.ricall.kafka.retry.consumers.synchronous;
 
 import io.ricall.kafka.retry.configuration.KafkaProperties;
 import io.ricall.kafka.retry.configuration.KafkaProperties.DelayTopic;
@@ -43,63 +43,76 @@ import static org.springframework.kafka.support.KafkaHeaders.RECEIVED_TIMESTAMP;
 
 @Data
 @Slf4j
-public abstract class AbstractRetryTopicListener implements Function<Message<byte[]>, Message<byte[]>> {
+public abstract class AbstractSynchronousRetryTopicListener implements Function<Message<byte[]>, Message<byte[]>> {
 
     @Autowired private KafkaProperties properties;
     @Autowired private MessageRouter topicResolver;
     @Autowired private DelayService delayService;
 
+    private volatile long windowStart;
     private volatile long windowEnd;
 
     @PostConstruct
     public void init() {
+        windowStart = 0;
         windowEnd = System.currentTimeMillis() + getTopicConfiguration().getDelay().toMillis();
     }
 
     public abstract DelayTopic getTopicConfiguration();
 
-    @Override
-    public Message<byte[]> apply(Message<byte[]> message) {
-        return handleMessage(message);
+    private boolean isSameDestinationTopic(String topic) {
+        return getTopicConfiguration().getTopic().equals(topic);
     }
 
     private synchronized long advanceWindowEndIfNecessary(long now, long messageTime) {
         long topicDelay = getTopicConfiguration().getDelay().toMillis();
 
         while (messageTime > windowEnd && windowEnd < (now + topicDelay)) {
+            windowStart = windowEnd;
             windowEnd += topicDelay;
         }
         return windowEnd;
     }
 
-    private Message<byte[]> handleMessage(Message<byte[]> message) {
+    private synchronized boolean inWindow(long messageTime) {
+        return messageTime > windowStart;
+    }
+
+    @Override
+    public Message<byte[]> apply(Message<byte[]> message) {
         final MessageHeaders headers = message.getHeaders();
-        final long time = Optional.ofNullable(headers.get(RetryService.RETRY_TIME, Long.class))
+
+        final long messageDeliveryTime = Optional.ofNullable(headers.get(RetryService.RETRY_TIME, Long.class))
                 .orElseThrow(IllegalStateException::new);
         final long now = System.currentTimeMillis();
-        final DelayTopic configuration = getTopicConfiguration();
 
         String trace = Optional.ofNullable(headers.get("_trace", String.class))
                 .orElseThrow(IllegalStateException::new)
-                + " > " + getTopicConfiguration().getDelay() + "|" + (time - System.currentTimeMillis()) + "|";
+                + " > " + getTopicConfiguration().getDelay() + "|" + (messageDeliveryTime - System.currentTimeMillis()) + "|";
+
         String topic = topicResolver.getTopicToRouteMessageTo(headers);
-        if (configuration.getTopic().equals(topic)) {
+        if (isSameDestinationTopic(topic)) {
+            // Message will be sent back to this topic so we need to ensure that we are delaying
+            // the message
             long messageTime = Optional.ofNullable(headers.get(RECEIVED_TIMESTAMP, Long.class))
                     .orElseThrow(IllegalStateException::new);
 
             long currentWindowEnd = advanceWindowEndIfNecessary(now, messageTime);
-            if (messageTime < currentWindowEnd) {
-                long delay = time - now - properties.getJitter().toMillis();
-
-                delay = Math.min(delay, currentWindowEnd - now);
+            if (inWindow(messageTime)) {
+                // Ensure that any delays will finish on the *current-window-end* (minus 20ms)
+                long delay = Math.min(messageDeliveryTime - now , currentWindowEnd - now) - 20;
                 if (delay > 0) {
+                    // We can only delay while we are within the current window
                     delayService.delayMillis(delay);
+                    // after the delay we may need to send the message to another topic
                     topic = topicResolver.getTopicToRouteMessageTo(headers);
                 }
             }
         }
-        trace += topic + "|" + (time - System.currentTimeMillis());
+
+        trace += topic + "|" + (messageDeliveryTime - System.currentTimeMillis());
         log.info("OUT [{}] {} (delay {}ms)", trace, new String(message.getPayload()), System.currentTimeMillis() - now);
+
         return MessageBuilder.fromMessage(message)
                 .setHeader("spring.cloud.stream.sendto.destination", topic)
                 .setHeader("_trace", trace)

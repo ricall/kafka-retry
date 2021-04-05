@@ -1,6 +1,9 @@
 server:
   port: 8200
 
+consumer:
+  reactive: false
+
 spring:
   cloud:
     stream:
@@ -102,16 +105,16 @@ spring:
           consumer.concurrency: 1
 
 retry:
-  jitter: 50ms
+  jitter: 100ms
   dead-letter-topic: retry.dlq
   delay-topics:
-    - delay: 500ms
-      topic: retry.internal.delay1
     - delay: 1s
-      topic: retry.internal.delay2
+      topic: retry.internal.delay1
     - delay: 3s
+      topic: retry.internal.delay2
+    - delay: 7s
       topic: retry.internal.delay3
-    - delay: 9s
+    - delay: 17s
       topic: retry.internal.delay4
 
 logging:

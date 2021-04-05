@@ -21,17 +21,17 @@
  * WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
-package io.ricall.kafka.retry.consumers;
+package io.ricall.kafka.retry.consumers.reactive;
 
+import io.ricall.kafka.retry.configuration.KafkaProperties;
 import io.ricall.kafka.retry.configuration.KafkaProperties.DelayTopic;
 import io.ricall.kafka.retry.router.MessageRouter;
 import io.ricall.kafka.retry.router.MissingHeaderException;
 import io.ricall.kafka.retry.service.RetryService;
-import lombok.RequiredArgsConstructor;
+import lombok.Data;
+import lombok.NoArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.kafka.support.Acknowledgment;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.messaging.Message;
 import org.springframework.messaging.MessageHeaders;
 import org.springframework.messaging.support.MessageBuilder;
@@ -42,19 +42,20 @@ import java.time.Duration;
 import java.util.Optional;
 import java.util.function.Function;
 
-import static org.springframework.kafka.support.KafkaHeaders.ACKNOWLEDGMENT;
-
 /**
  * Looses messages on restart :(
  *
  * acks need to be made in sequence
  */
-@RequiredArgsConstructor
+@Data
+@Slf4j
+@NoArgsConstructor
 public abstract class AbstractReactiveRetryTopicListener implements Function<Flux<Message<byte[]>>, Flux<Message<byte[]>>> {
 
-    private final Logger log;
-    private final DelayTopic configuration;
-    private final MessageRouter topicResolver;
+    @Autowired private KafkaProperties properties;
+    @Autowired private MessageRouter topicResolver;
+
+    public abstract DelayTopic getTopicConfiguration();
 
     @Override
     public Flux<Message<byte[]>> apply(Flux<Message<byte[]>> messages) {
@@ -66,35 +67,48 @@ public abstract class AbstractReactiveRetryTopicListener implements Function<Flu
     private Mono<Message<byte[]>> handleMessage(Message<byte[]> message) {
         final MessageHeaders headers = message.getHeaders();
 
-        final Acknowledgment acknowledgment = Optional.ofNullable(headers.get(ACKNOWLEDGMENT, Acknowledgment.class))
-                .orElseThrow(() -> new MissingHeaderException(ACKNOWLEDGMENT));
-        String newTopic = topicResolver.getTopicToRouteMessageTo(headers);
-        if (configuration.getTopic().equals(newTopic)) {
-            long delay = Optional.ofNullable(headers.get(RetryService.RETRY_TIME, Long.class))
-                    .orElseThrow(MissingHeaderException::new) - System.currentTimeMillis() - 50;
+        long messageDeliveryTime = Optional.ofNullable(headers.get(RetryService.RETRY_TIME, Long.class))
+                .orElseThrow(MissingHeaderException::new) ;
+        final long now = System.currentTimeMillis();
+        String trace = Optional.ofNullable(headers.get("_trace", String.class))
+                .orElseThrow(IllegalStateException::new)
+                + " > " + getTopicConfiguration().getDelay() + "|" + (messageDeliveryTime - System.currentTimeMillis()) + "|";
+//        final Acknowledgment acknowledgment = Optional.ofNullable(headers.get(ACKNOWLEDGMENT, Acknowledgment.class))
+//                .orElseThrow(() -> new MissingHeaderException(ACKNOWLEDGMENT));
 
+        String topic = topicResolver.getTopicToRouteMessageTo(headers);
+        if (getTopicConfiguration().getTopic().equals(topic)) {
+
+            long delay = Math.min(messageDeliveryTime - now, getTopicConfiguration().getDelay().toMillis()) - 20;
             if (delay > 0) {
-                delay = Math.min(delay, configuration.getDelay().toMillis());
                 return Mono.just(message)
                         .delayElement(Duration.ofMillis(delay))
-                        .map(this::sendToNextTopic)
-                        .doOnNext(m -> acknowledgment.acknowledge());
+                        .map(sendToNextTopic(trace, messageDeliveryTime));
+//                        .doOnNext(m -> acknowledgment.acknowledge());
             }
-            newTopic = topicResolver.getTopicToRouteMessageTo(headers);
+            topic = topicResolver.getTopicToRouteMessageTo(headers);
 
         }
+
+        trace += topic + "|" + (messageDeliveryTime - System.currentTimeMillis());
         return Mono.just(MessageBuilder.fromMessage(message)
-                .setHeader("spring.cloud.stream.sendto.destination", newTopic)
-                .build())
-            .doOnNext(m -> acknowledgment.acknowledge());
+                .setHeader("spring.cloud.stream.sendto.destination", topic)
+                .setHeader("_trace", trace)
+                .build());
+//            .doOnNext(m -> acknowledgment.acknowledge());
     }
 
-    private Message<byte[]> sendToNextTopic(Message<byte[]> message) {
-        final MessageHeaders headers = message.getHeaders();
+    private Function<Message<byte[]>, Message<byte[]>> sendToNextTopic(String trace, long messageDeliveryTime) {
+        return message -> {
+            final MessageHeaders headers = message.getHeaders();
+            final String topic = topicResolver.getTopicToRouteMessageTo(headers);
 
-        return MessageBuilder.fromMessage(message)
-                .setHeader("spring.cloud.stream.sendto.destination", topicResolver.getTopicToRouteMessageTo(headers))
-                .build();
+            final String newTrace = trace + topic + "|" + (messageDeliveryTime - System.currentTimeMillis());
+            return MessageBuilder.fromMessage(message)
+                    .setHeader("spring.cloud.stream.sendto.destination", topic)
+                    .setHeader("_trace", newTrace)
+                    .build();
+        };
     }
 
     private void onError(Throwable t, Object object) {
