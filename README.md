@@ -1,6 +1,6 @@
 # kafka-retry
 Sample project for trialing a generic retry microservice that can be used
-to support delayed delivery of messages
+to support delayed delivery of messages in Kafka
 
 ### Retry Logic
 All messages are sent to a `retry.topic` kafka topic. Each message should have the following headers set:
